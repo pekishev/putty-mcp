@@ -1,0 +1,13 @@
+[project]
+name = "putty-mcp"
+version = "1.0.0"
+description = "MCP server for listing, reading, and sending commands to PuTTY windows"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "pywin32>=306;sys_platform=='win32'",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
