@@ -45,8 +45,9 @@ def putty_send_command(
     process_id: int | None = None,
     append_newline: bool = True,
 ) -> dict:
-    """Send a command to an open PuTTY window (types the text and optionally Enter).
-    The window is brought to foreground, then the string is sent as keystrokes.
+    """Send a command to an open PuTTY window (optionally with Enter).
+    Normal text is delivered via PuTTY clipboard paste (reliable for long lines);
+    control characters such as Ctrl+C still use WM_CHAR keystrokes.
     Specify host or title_substring to pick one window when several are open; or process_id.
     Windows only; requires pywin32."""
     return window_send.send_putty_command(

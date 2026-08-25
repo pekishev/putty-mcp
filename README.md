@@ -88,7 +88,7 @@ Use the absolute path to `putty_mcp.py` on your machine.
 ## How it works
 
 - **Read** — sends PuTTY system command *Copy All to Clipboard* (`IDM_COPYALL`) via `PostMessage`, reads the clipboard, then restores the previous clipboard content.
-- **Send** — resolves the target window, best-effort activation/focus, then sends characters with `WM_CHAR` directly to the PuTTY window. Delivery does not strictly depend on stealing OS foreground focus.
+- **Send** — resolves the target window, best-effort activation/focus, then delivers text primarily via clipboard paste (`IDM_PASTE`). This avoids mid-line truncation of long shell commands that happened with per-character `WM_CHAR` streams. Control characters (e.g. Ctrl+C) still use `WM_CHAR`. Delivery does not strictly depend on stealing OS foreground focus.
 - **Clear** — sends PuTTY *Clear Scrollback* (`IDM_CLRSB`) via system menu command ID; works regardless of UI locale.
 
 PuTTY windows are detected by process name (`putty.exe`), not by window title alone.
