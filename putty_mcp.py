@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from mcp.server.fastmcp import FastMCP
 
 from putty_lib import window_reader
 from putty_lib import window_send
+from putty_lib import window_upload
 
 mcp = FastMCP("putty-mcp", json_response=True)
 
@@ -72,6 +75,37 @@ def putty_clear_window(
         title_substring=title_substring,
         process_id=process_id,
     )
+
+
+@mcp.tool()
+def putty_upload_text(
+    content: str,
+    remote_path: str,
+    host: str | None = None,
+    title_substring: str | None = None,
+    process_id: int | None = None,
+    encoding: Literal["shell", "hex"] = "shell",
+    chunk_size: int | None = None,
+    verify: bool = True,
+) -> dict:
+    """Upload text/data to a remote file via many short printf chunks.
+
+    Use this for payloads longer than ~400 characters (remote tty line limit).
+    encoding='shell' is fast for UTF-8 text; encoding='hex' is binary-safe and
+    does not require base64 on the remote host.
+    Specify host or title_substring when several windows are open; or process_id.
+    Windows only; requires pywin32."""
+    return window_upload.upload_putty_text(
+        content=content,
+        remote_path=remote_path,
+        host=host,
+        title_substring=title_substring,
+        process_id=process_id,
+        encoding=encoding,
+        chunk_size=chunk_size,
+        verify=verify,
+    )
+
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")

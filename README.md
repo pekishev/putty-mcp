@@ -2,7 +2,7 @@
 
 Minimal [Model Context Protocol](https://modelcontextprotocol.io/) server for interacting with already opened PuTTY windows on Windows.
 
-The server exposes 4 tools: list windows, read terminal output, send commands, and clear scrollback.
+The server exposes 5 tools: list windows, read terminal output, send commands, clear scrollback, and chunked file upload.
 
 ## Tools
 
@@ -12,6 +12,7 @@ The server exposes 4 tools: list windows, read terminal output, send commands, a
 | `putty_read_window` | Read full text (screen + scrollback) from a selected PuTTY window |
 | `putty_send_command` | Send text to a selected PuTTY window (optionally with Enter) |
 | `putty_clear_window` | Clear scrollback/history in a selected PuTTY window |
+| `putty_upload_text` | Upload long text/data to a remote path via short `printf` chunks |
 
 ### Window selection
 
@@ -32,7 +33,15 @@ If exactly one PuTTY window is open, the selector is optional.
 - `command` (required) — text to send
 - `append_newline` (default: `true`) — append Enter after the command
 
-**`putty_read_window`**, **`putty_clear_window`**, **`putty_send_command`**
+**`putty_upload_text`**
+
+- `content` (required) — payload to write remotely
+- `remote_path` (required) — destination path on the remote host
+- `encoding` — `shell` (default, UTF-8 text) or `hex` (binary-safe, no remote `base64`)
+- `chunk_size` — optional override; keep resulting shell lines under ~480 chars
+- `verify` (default: `true`) — check remote size with `wc -c`
+
+**`putty_read_window`**, **`putty_clear_window`**, **`putty_send_command`**, **`putty_upload_text`**
 
 - `process_id`, `host`, or `title_substring` — see [Window selection](#window-selection)
 
@@ -89,6 +98,7 @@ Use the absolute path to `putty_mcp.py` on your machine.
 
 - **Read** — sends PuTTY system command *Copy All to Clipboard* (`IDM_COPYALL`) via `PostMessage`, reads the clipboard, then restores the previous clipboard content.
 - **Send** — resolves the target window, best-effort activation/focus, then delivers text primarily via clipboard paste (`IDM_PASTE`). This avoids mid-line truncation of long shell commands that happened with per-character `WM_CHAR` streams. Control characters (e.g. Ctrl+C) still use `WM_CHAR`. Delivery does not strictly depend on stealing OS foreground focus.
+- **Upload** — for payloads beyond the remote tty line limit (~400–500 chars), writes the file with many short `printf` appends (`shell` or binary-safe `hex` encoding) and optionally verifies size with `wc -c`.
 - **Clear** — sends PuTTY *Clear Scrollback* (`IDM_CLRSB`) via system menu command ID; works regardless of UI locale.
 
 PuTTY windows are detected by process name (`putty.exe`), not by window title alone.
@@ -101,7 +111,8 @@ Examples:
 
 - `putty_list_windows` → `{ "success": true, "windows": [{ "title": "...", "pid": 1234 }], "count": 1 }`
 - `putty_read_window` → `{ "success": true, "content": "...", "window_title": "..." }`
-- `putty_send_command` → `{ "success": true, "window_title": "...", "command_sent": "...\n", "activated": true }`
+- `putty_send_command` → `{ "success": true, "window_title": "...", "command_sent": "...\n", "activated": true, "delivery": "paste" }`
+- `putty_upload_text` → `{ "success": true, "remote_path": "/tmp/x", "bytes": 2500, "chunks_sent": 21, "encoding": "shell" }`
 - `putty_clear_window` → `{ "success": true, "window_title": "...", "message": "PuTTY scrollback was cleared." }`
 
 On errors, responses include `error` and, when relevant, a `windows` list to help pick the right target.
@@ -109,6 +120,7 @@ On errors, responses include `error` and, when relevant, a `windows` list to hel
 ## Usage notes
 
 - `putty_send_command` confirms that text was sent; it does **not** return command stdout. Read output with `putty_read_window`.
+- For content longer than ~400–500 characters, use `putty_upload_text` instead of one giant `putty_send_command` (remote tty line limit).
 - Prefer `process_id` over title matching when multiple sessions are open.
 - If activation is blocked by Windows focus rules, sending may still succeed (`activated: false`); bring PuTTY to the foreground manually if needed.
 - Before diagnostics, use `putty_clear_window` or marker commands (`echo DIAG_START` / `echo DIAG_END`) to reduce noise in long scrollback.
@@ -120,6 +132,7 @@ putty_mcp.py          # MCP server entry point (FastMCP, stdio transport)
 putty_lib/
   window_reader.py    # List/read PuTTY windows
   window_send.py      # Send commands and clear scrollback
+  window_upload.py    # Chunked remote file upload via printf
 ```
 
 ## Limitations
