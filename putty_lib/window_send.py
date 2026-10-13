@@ -1,8 +1,9 @@
 """Send commands to an open PuTTY window.
 
-Activates the window, then delivers text either via clipboard paste
-(IDM_PASTE — reliable for long lines) or WM_CHAR (needed for control
-characters such as Ctrl+C). Requires pywin32 on Windows.
+Delivers text either via clipboard paste (IDM_PASTE — reliable for long
+lines) or WM_CHAR (needed for control characters such as Ctrl+C).
+Messages go straight to the PuTTY hwnd, so the window is not restored,
+raised, or focused. Requires pywin32 on Windows.
 """
 
 from __future__ import annotations
@@ -35,12 +36,9 @@ if sys.platform != "win32":
         }
 else:
     try:
-        import ctypes
-        from ctypes import wintypes
         import win32clipboard
         import win32con
         import win32gui
-        import win32process
     except ImportError:
         def send_putty_command(
             command: str,
@@ -66,10 +64,8 @@ else:
     else:
         from putty_lib import window_reader
 
-        user32 = ctypes.windll.user32
         WM_CHAR = 0x0102
         WM_SYSCOMMAND = 0x0112
-        SW_RESTORE = 9
         # PuTTY system-menu IDs from windows/window.c in upstream PuTTY.
         IDM_CLRSB = 0x0060
         IDM_PASTE = 0x01A0
@@ -79,33 +75,6 @@ else:
         # which left ash waiting on a ">" continuation prompt.
         _PASTE_MIN_LEN = 1
 
-        def _get_putty_focus_hwnd(main_hwnd: int) -> int | None:
-            """Return the hwnd that has keyboard focus in PuTTY's thread, or None."""
-            GUITHREADINFO = type("GUITHREADINFO", (ctypes.Structure,), {
-                "_fields_": [
-                    ("cbSize", wintypes.DWORD),
-                    ("flags", wintypes.DWORD),
-                    ("hwndActive", ctypes.c_void_p),
-                    ("hwndFocus", ctypes.c_void_p),
-                    ("hwndCapture", ctypes.c_void_p),
-                    ("hwndMenuOwner", ctypes.c_void_p),
-                    ("hwndMoveSize", ctypes.c_void_p),
-                    ("hwndCaret", ctypes.c_void_p),
-                    ("rcCaret", wintypes.RECT),
-                ]
-            })
-            putty_tid, _ = win32process.GetWindowThreadProcessId(main_hwnd)
-            gti = GUITHREADINFO()
-            gti.cbSize = ctypes.sizeof(GUITHREADINFO)
-            if not user32.GetGUIThreadInfo(putty_tid, ctypes.byref(gti)):
-                return None
-            target = gti.hwndFocus or gti.hwndActive
-            return int(target) if target else None
-
-        # Retry and timing constants for window activation
-        _ACTIVATE_ATTEMPTS = 3
-        _ACTIVATE_DELAY_S = 0.5
-        _FOCUS_DELAY_S = 0.4
         _CHAR_DELAY_S = 0.01
         _PASTE_DELAY_S = 0.15
 
@@ -173,35 +142,6 @@ else:
                         pass
             return "paste"
 
-        def _activate_and_focus(hwnd: int, focus_hwnd: int) -> bool:
-            """Best-effort PuTTY activation.
-
-            Windows can deny SetForegroundWindow when another process owns the
-            foreground lock. That must not block command sending because paste /
-            WM_CHAR are addressed directly to PuTTY's hwnd, not to the foreground
-            window.
-            """
-            activated = False
-            for attempt in range(_ACTIVATE_ATTEMPTS):
-                try:
-                    user32.ShowWindow(hwnd, SW_RESTORE)
-                    user32.BringWindowToTop(hwnd)
-                    win32gui.SetForegroundWindow(hwnd)
-                except Exception:
-                    pass
-                time.sleep(_ACTIVATE_DELAY_S)
-                try:
-                    user32.SetFocus(focus_hwnd)
-                except Exception:
-                    pass
-                time.sleep(_FOCUS_DELAY_S)
-                if win32gui.GetForegroundWindow() == hwnd:
-                    activated = True
-                    break
-                if attempt < _ACTIVATE_ATTEMPTS - 1:
-                    time.sleep(0.3)
-            return activated
-
         def send_putty_command(
             command: str,
             host: str | None = None,
@@ -222,16 +162,15 @@ else:
                 }
             hwnd = resolved["hwnd"]
             title = resolved.get("title", "")
-            putty_tid, _ = win32process.GetWindowThreadProcessId(hwnd)
-            kernel32 = ctypes.windll.kernel32
-            our_tid = kernel32.GetCurrentThreadId()
-            attached = False
-            focus_hwnd = _get_putty_focus_hwnd(hwnd) or hwnd
             method = "wm_char"
+            # Paste and WM_CHAR are addressed to this hwnd. Do not restore,
+            # raise, or focus the window: SW_RESTORE shrinks a maximized
+            # PuTTY, and SetForegroundWindow steals the user's focus.
             try:
-                if putty_tid != our_tid:
-                    attached = user32.AttachThreadInput(our_tid, putty_tid, 1)
-                activated = _activate_and_focus(hwnd, focus_hwnd)
+                activated = win32gui.GetForegroundWindow() == hwnd
+            except Exception:
+                activated = False
+            try:
                 # Prefer clipboard paste for normal text: bulk paste avoids the
                 # mid-line truncation that WM_CHAR streams hit on long shell lines.
                 if (
@@ -244,9 +183,6 @@ else:
                     method = "wm_char"
             except Exception as e:
                 return {"success": False, "error": f"Send failed: {e}"}
-            finally:
-                if attached:
-                    user32.AttachThreadInput(our_tid, putty_tid, 0)
             return {
                 "success": True,
                 "window_title": title,

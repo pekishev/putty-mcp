@@ -97,7 +97,7 @@ Use the absolute path to `putty_mcp.py` on your machine.
 ## How it works
 
 - **Read** — sends PuTTY system command *Copy All to Clipboard* (`IDM_COPYALL`) via `PostMessage`, reads the clipboard, then restores the previous clipboard content.
-- **Send** — resolves the target window, best-effort activation/focus, then delivers text primarily via clipboard paste (`IDM_PASTE`). This avoids mid-line truncation of long shell commands that happened with per-character `WM_CHAR` streams. Control characters (e.g. Ctrl+C) still use `WM_CHAR`. Delivery does not strictly depend on stealing OS foreground focus.
+- **Send** — resolves the target window and delivers text primarily via clipboard paste (`IDM_PASTE`). This avoids mid-line truncation of long shell commands that happened with per-character `WM_CHAR` streams. Control characters (e.g. Ctrl+C) still use `WM_CHAR`. Messages are posted to the PuTTY hwnd, so a background or maximized window stays where it is: it is not restored, raised, or focused.
 - **Upload** — for payloads beyond the remote tty line limit (~400–500 chars), writes the file with many short `printf` appends (`shell` or binary-safe `hex` encoding) and optionally verifies size with `wc -c`.
 - **Clear** — sends PuTTY *Clear Scrollback* (`IDM_CLRSB`) via system menu command ID; works regardless of UI locale.
 
@@ -111,7 +111,7 @@ Examples:
 
 - `putty_list_windows` → `{ "success": true, "windows": [{ "title": "...", "pid": 1234 }], "count": 1 }`
 - `putty_read_window` → `{ "success": true, "content": "...", "window_title": "..." }`
-- `putty_send_command` → `{ "success": true, "window_title": "...", "command_sent": "...\n", "activated": true, "delivery": "paste" }`
+- `putty_send_command` → `{ "success": true, "window_title": "...", "command_sent": "...\n", "activated": false, "delivery": "paste" }`
 - `putty_upload_text` → `{ "success": true, "remote_path": "/tmp/x", "bytes": 2500, "chunks_sent": 21, "encoding": "shell" }`
 - `putty_clear_window` → `{ "success": true, "window_title": "...", "message": "PuTTY scrollback was cleared." }`
 
@@ -122,7 +122,7 @@ On errors, responses include `error` and, when relevant, a `windows` list to hel
 - `putty_send_command` confirms that text was sent; it does **not** return command stdout. Read output with `putty_read_window`.
 - For content longer than ~400–500 characters, use `putty_upload_text` instead of one giant `putty_send_command` (remote tty line limit).
 - Prefer `process_id` over title matching when multiple sessions are open.
-- If activation is blocked by Windows focus rules, sending may still succeed (`activated: false`); bring PuTTY to the foreground manually if needed.
+- `activated` reports whether that PuTTY window was already in the foreground. The tool does not change window size, z-order, or focus. A minimized window stays minimized and still receives the command.
 - Before diagnostics, use `putty_clear_window` or marker commands (`echo DIAG_START` / `echo DIAG_END`) to reduce noise in long scrollback.
 
 ## Project layout
